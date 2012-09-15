@@ -102,7 +102,7 @@ class GNB(object):
     if inverse:
       configs.append(inverse)
     for config in configs:
-      c.execute('insert into edge_config (type, unique_, bidi, inverse_type, inverse_unique) values (?,?,?,?,?)', (
+      c.execute('insert or replace into edge_config (type, unique_, bidi, inverse_type, inverse_unique) values (?,?,?,?,?)', (
           config.type, config.unique, config.bidi, config.inverse_type, config.inverse_unique))
     self.refresh_edge_config()
   def refresh_edge_config(self):
