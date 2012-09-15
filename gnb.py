@@ -34,6 +34,8 @@ class ConnectionManager(object):
     if not getattr(self.local, 'conn', None):
       self.local.conn = sqlite3.connect(self.filename)
     return self.local.conn.cursor()
+  def commit(self):
+    self.local.conn.commit()
 
 class GNB(object):
   def __init__(self, filename):
@@ -54,11 +56,12 @@ class GNB(object):
   def obj_put(self, oid, value):
     c = self.conn.cursor()
     c.execute('insert or replace into obj (oid, data) values (?,?)', (oid, json.dumps(value)))
+    self.conn.commit()
   def obj_delete(self, oid):
     c = self.conn.cursor()
     c.execute('delete from obj where oid=?', (oid,))
+    self.conn.commit()
   def edge_add(self, edge):
-    # TODO: these constraints are really fragile and full of bugs.
     c = self.conn.cursor()
     config = self.configs[edge.type]
     inverse_config = config.get_inverse()
@@ -76,6 +79,7 @@ class GNB(object):
         for old_edge in old_edges.values():
           self.edge_remove(old_edge.oid1, old_edge.oid2, old_edge.type)
       c.execute('insert into edges (oid1, oid2, type, order_, data) values (?,?,?,?,?)', (edge.oid1, edge.oid2, edge.type, edge.order, json.dumps(edge.data)))
+      self.conn.commit()
   def edge_remove(self, oid1, oid2, type):
     c = self.conn.cursor()
     config = self.configs[type]
@@ -87,6 +91,7 @@ class GNB(object):
       edges_to_remove.append((oid2, oid1, inverse_config.type))
     for (oid1, oid2, type) in edges_to_remove:
       c.execute('delete from edges where oid1=? and oid2=? and type=?', (oid1, oid2, type))
+    self.conn.commit()
   def edge_get(self, oid, type, start=None, end=None):
     c = self.conn.cursor()
     query = 'select oid1, oid2, type, order_, data from edges where oid1=? and type=?'
