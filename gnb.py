@@ -47,6 +47,7 @@ class GNB(object):
     c = self.conn.cursor()
     c.execute('delete from obj where oid=?', (oid,))
   def edge_add(self, edge):
+    # TODO: these constraints are really fragile and full of bugs.
     c = self.conn.cursor()
     config = self.configs[edge.type]
     inverse_config = config.get_inverse()
