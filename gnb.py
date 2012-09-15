@@ -32,8 +32,8 @@ class GNB(object):
   def init_schema(self):
     c = self.conn.cursor()
     c.execute('create table if not exists obj (oid varchar(255) primary key, data text)')
-    c.execute('create table if not exists edges (oid1 varchar(255), oid2 varchar(255), type varchar(255), order_ integer, data varchar(255))')
-    c.execute('create table if not exists edge_config (type varchar(255), unique_ boolean, bidi boolean, inverse_type varchar(255), inverse_unique boolean)')
+    c.execute('create table if not exists edges (oid1 varchar(255), oid2 varchar(255), type varchar(255), order_ integer, data varchar(255), primary key (oid1, oid2, type))')
+    c.execute('create table if not exists edge_config (type varchar(255) primary key, unique_ boolean, bidi boolean, inverse_type varchar(255), inverse_unique boolean)')
   def oid(self):
     return str(uuid.uuid4())
   def obj_get(self, oid):
