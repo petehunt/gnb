@@ -2,6 +2,7 @@ import sqlite3
 import json
 import uuid
 import unittest
+import threading
 
 class EdgeConfig(object):
   def __init__(self, type, unique=False, bidi=False, inverse_type=None, inverse_unique=None):
@@ -24,9 +25,19 @@ class Edge(object):
     self.order = order
     self.data = data
 
+class ConnectionManager(object):
+  ''' blah, hack to make multithreading work '''
+  def __init__(self, filename):
+    self.filename = filename
+    self.local = threading.local()
+  def cursor(self):
+    if not getattr(self.local, 'conn', None):
+      self.local.conn = sqlite3.connect(self.filename)
+    return self.local.conn.cursor()
+
 class GNB(object):
   def __init__(self, filename):
-    self.conn = sqlite3.connect(filename)
+    self.conn = ConnectionManager(filename)
     self.init_schema()
     self.refresh_edge_config()
   def init_schema(self):
