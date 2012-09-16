@@ -72,10 +72,8 @@ class GNB(object):
     return uuid.uuid4().hex
   def obj_get(self, oid):
     results = self.conn.query('select data from obj where oid=?', (oid,))
-    try:
-      return json.loads(results[0][0])
-    except:
-      return None
+    assert len(results) > 0, 'No object with id %r found' % oid
+    return json.loads(results[0][0])
   def obj_put(self, oid, value):
     self.conn.query('insert or replace into obj (oid, data) values (?,?)', (oid, json.dumps(value)))
   def obj_delete(self, oid):
@@ -124,10 +122,9 @@ class GNB(object):
       edges[oid2] = Edge(oid1, oid2, type, order, data)
     return edges
   def edge_get_one(self, oid, type):
-    try:
-      return self.edge_get(oid, type).values()[0]
-    except:
-      return None
+    edges = self.edge_get(oid, type).values()
+    assert len(edges) > 0, 'No edges from oid %r of type %r found' % (oid, type)
+    return edges[0]
   def edge_config_add(self, config):
     # write the config
     configs =[config]
