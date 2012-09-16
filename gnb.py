@@ -3,6 +3,7 @@ import json
 import uuid
 import unittest
 import threading
+import Queue
 
 class EdgeConfig(object):
   def __init__(self, type, unique=False, bidi=False, inverse_type=None, inverse_unique=None):
@@ -25,44 +26,61 @@ class Edge(object):
     self.order = order
     self.data = data
 
-class ConnectionManager(object):
+class Query(object):
+  def __init__(self, sql, args=()):
+    self.sql = sql
+    self.args = args
+    self.event = threading.Event()
+  def go(self, conn):
+    c = conn.cursor()
+    c.execute(self.sql, self.args)
+    self.results = c.fetchall()
+    conn.commit()
+    self.event.set()
+  def get(self):
+    self.event.wait()
+    return self.results
+
+class ConnectionManager(threading.Thread):
   ''' blah, hack to make multithreading work '''
   def __init__(self, filename):
+    threading.Thread.__init__(self)
     self.filename = filename
-    self.local = threading.local()
-  def cursor(self):
-    if not getattr(self.local, 'conn', None):
-      self.local.conn = sqlite3.connect(self.filename)
-    return self.local.conn.cursor()
-  def commit(self):
-    self.local.conn.commit()
+    self.queue = Queue.Queue()
+    self.setDaemon(True)
+  def run(self):
+    conn = sqlite3.connect(self.filename)
+    while True:
+      query = self.queue.get()
+      query.go(conn)
+  def query(self, sql, args=()):
+    query = Query(sql, args)
+    self.queue.put(query)
+    return query.get()
 
 class GNB(object):
   def __init__(self, filename):
     self.conn = ConnectionManager(filename)
+    self.conn.start()
     self.init_schema()
     self.refresh_edge_config()
   def init_schema(self):
-    c = self.conn.cursor()
-    c.execute('create table if not exists obj (oid varchar(255) primary key, data text)')
-    c.execute('create table if not exists edges (oid1 varchar(255), oid2 varchar(255), type varchar(255), order_ integer, data varchar(255), primary key (oid1, oid2, type))')
-    c.execute('create table if not exists edge_config (type varchar(255) primary key, unique_ boolean, bidi boolean, inverse_type varchar(255), inverse_unique boolean)')
+    self.conn.query('create table if not exists obj (oid varchar(255) primary key, data text)')
+    self.conn.query('create table if not exists edges (oid1 varchar(255), oid2 varchar(255), type varchar(255), order_ integer, data varchar(255), primary key (oid1, oid2, type))')
+    self.conn.query('create table if not exists edge_config (type varchar(255) primary key, unique_ boolean, bidi boolean, inverse_type varchar(255), inverse_unique boolean)')
   def oid(self):
     return uuid.uuid4().hex
   def obj_get(self, oid):
-    c = self.conn.cursor()
-    c.execute('select data from obj where oid=?', (oid,))
-    return json.loads(c.fetchone()[0])
+    results = self.conn.query('select data from obj where oid=?', (oid,))
+    try:
+      return json.loads(results[0][0])
+    except:
+      return None
   def obj_put(self, oid, value):
-    c = self.conn.cursor()
-    c.execute('insert or replace into obj (oid, data) values (?,?)', (oid, json.dumps(value)))
-    self.conn.commit()
+    self.conn.query('insert or replace into obj (oid, data) values (?,?)', (oid, json.dumps(value)))
   def obj_delete(self, oid):
-    c = self.conn.cursor()
-    c.execute('delete from obj where oid=?', (oid,))
-    self.conn.commit()
+    self.conn.query('delete from obj where oid=?', (oid,))
   def edge_add(self, edge):
-    c = self.conn.cursor()
     config = self.configs[edge.type]
     inverse_config = config.get_inverse()
     edges = [(edge, config)]
@@ -78,10 +96,8 @@ class GNB(object):
         old_edges = self.edge_get(edge.oid1, edge.type)
         for old_edge in old_edges.values():
           self.edge_remove(old_edge.oid1, old_edge.oid2, old_edge.type)
-      c.execute('insert into edges (oid1, oid2, type, order_, data) values (?,?,?,?,?)', (edge.oid1, edge.oid2, edge.type, edge.order, json.dumps(edge.data)))
-      self.conn.commit()
+      self.conn.query('insert into edges (oid1, oid2, type, order_, data) values (?,?,?,?,?)', (edge.oid1, edge.oid2, edge.type, edge.order, json.dumps(edge.data)))
   def edge_remove(self, oid1, oid2, type):
-    c = self.conn.cursor()
     config = self.configs[type]
     inverse_config = config.get_inverse()
     edges_to_remove = [(oid1, oid2, type)]
@@ -90,10 +106,8 @@ class GNB(object):
     if inverse_config:
       edges_to_remove.append((oid2, oid1, inverse_config.type))
     for (oid1, oid2, type) in edges_to_remove:
-      c.execute('delete from edges where oid1=? and oid2=? and type=?', (oid1, oid2, type))
-    self.conn.commit()
+      self.conn.query('delete from edges where oid1=? and oid2=? and type=?', (oid1, oid2, type))
   def edge_get(self, oid, type, start=None, end=None):
-    c = self.conn.cursor()
     query = 'select oid1, oid2, type, order_, data from edges where oid1=? and type=?'
     args = [oid, type]
     if start:
@@ -104,29 +118,30 @@ class GNB(object):
       args.append(end)
 
     query += ' order by order_'
-    c.execute(query, tuple(args))
+    results = self.conn.query(query, tuple(args))
     edges = {}
-    for (oid1, oid2, type, order, data) in c.fetchall():
+    for (oid1, oid2, type, order, data) in results:
       edges[oid2] = Edge(oid1, oid2, type, order, data)
     return edges
   def edge_get_one(self, oid, type):
-    return self.edge_get(oid, type).values()[0]
+    try:
+      return self.edge_get(oid, type).values()[0]
+    except:
+      return None
   def edge_config_add(self, config):
     # write the config
-    c = self.conn.cursor()
     configs =[config]
     inverse = config.get_inverse()
     if inverse:
       configs.append(inverse)
     for config in configs:
-      c.execute('insert or replace into edge_config (type, unique_, bidi, inverse_type, inverse_unique) values (?,?,?,?,?)', (
+      self.conn.query('insert or replace into edge_config (type, unique_, bidi, inverse_type, inverse_unique) values (?,?,?,?,?)', (
           config.type, config.unique, config.bidi, config.inverse_type, config.inverse_unique))
     self.refresh_edge_config()
   def refresh_edge_config(self):
-    c = self.conn.cursor()
     self.configs = {}
-    c.execute('select type, unique_, bidi, inverse_type, inverse_unique from edge_config')
-    for (type, unique, bidi, inverse_type, inverse_unique) in c.fetchall():
+    results = self.conn.query('select type, unique_, bidi, inverse_type, inverse_unique from edge_config')
+    for (type, unique, bidi, inverse_type, inverse_unique) in results:
       self.configs[type] = EdgeConfig(type, unique, bidi, inverse_type, inverse_unique)
 
 class GNBTestCase(unittest.TestCase):
