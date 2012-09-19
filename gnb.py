@@ -4,6 +4,7 @@ import uuid
 import unittest
 import threading
 import Queue
+import time
 
 class EdgeConfig(object):
   def __init__(self, type, unique=False, bidi=False, inverse_type=None, inverse_unique=None):
@@ -23,6 +24,8 @@ class Edge(object):
     self.oid1 = oid1
     self.oid2 = oid2
     self.type = type
+    if not order:
+      order = int(time.time() * 1000)
     self.order = order
     self.data = data
 
